@@ -8,6 +8,7 @@ bl_info = {
 }
 
 import bpy
+import zlib
 from bpy.types import Scene, Panel, Operator
 from bpy.props import EnumProperty, StringProperty
 
@@ -296,22 +297,41 @@ def update_split(self, context):
 def get_meshes(self, context):
     return [(obj.name, obj.name, obj.name) for obj in bpy.context.view_layer.objects if obj.type == 'MESH']
 
+def get_enum_value(name):
+    """Provide a stable enum number so inserting an item cannot shift saved selections."""
+    return zlib.crc32(name.encode('utf-8')) & 0x7fffffff
+
 def get_shapekeys(self, context):
     mesh = bpy.context.view_layer.objects.get(context.scene.vrcft_mesh)
     if not mesh or not mesh.data.shape_keys:
         return []
-    return [(sk.name, sk.name, '') for sk in mesh.data.shape_keys.key_blocks]
+    return [(sk.name, sk.name, '', 0, get_enum_value(sk.name)) for sk in mesh.data.shape_keys.key_blocks]
 
 def get_the_sus(self, context):
     mesh = bpy.context.view_layer.objects.get(context.scene.vrcft_mesh)
     if not mesh:
-        return [('NONE', 'None', '')]
-    return [('NONE', 'None', '')] + [(vg.name, vg.name, '') for vg in mesh.vertex_groups]
+        return [('NONE', 'None', '', 0, get_enum_value('NONE'))]
+    return [('NONE', 'None', '', 0, get_enum_value('NONE'))] + [
+        (vg.name, vg.name, '', 0, get_enum_value(vg.name)) for vg in mesh.vertex_groups
+    ]
 
 def get_the_among_us(context):
     if context.scene.vrcft_mode == 'FULL':
         return VRCFT_Labels_Full_Unsplit if context.scene.vrcft_split == 'UNSPLIT' else VRCFT_Labels_Full_Split
     return VRCFT_Labels_Partial_Unsplit if context.scene.vrcft_split == 'UNSPLIT' else VRCFT_Labels_Partial_Split
+
+def get_label_property_suffix(label):
+    """Return a stable, RNA-safe suffix for properties belonging to a label."""
+    return ''.join(
+        character if character.isascii() and character.isalnum() else f"_x{ord(character):x}_"
+        for character in label
+    )
+
+def get_all_labels():
+    """Include the original lists so removed rows can still be unregistered."""
+    return list(dict.fromkeys(
+        VRCFT_PU_OG + VRCFT_PS_OG + VRCFT_FU_OG + VRCFT_FS_OG
+    ))
 
 class VRCFTCreateShapeKeys(Operator):
     bl_label = "Create VRCFT Shape Keys"
@@ -336,9 +356,10 @@ class VRCFTCreateShapeKeys(Operator):
         for key in mesh.data.shape_keys.key_blocks:
             key.value = 0
 
-        for i, label in enumerate(active_list):
-            source_key = getattr(context.scene, f"vrcft_shapekeys_{i}")
-            vertex_group = getattr(context.scene, f"vrcft_vertex_groups_{i}")
+        for label in active_list:
+            suffix = get_label_property_suffix(label)
+            source_key = getattr(context.scene, f"vrcft_shapekeys_{suffix}")
+            vertex_group = getattr(context.scene, f"vrcft_vertex_groups_{suffix}")
 
             if label in existing_keys and source_key == "Basis":
                 continue
@@ -454,12 +475,13 @@ class VRCFT_UL(Panel):
             active_list = get_the_among_us(context)
 
             for i, label in enumerate(active_list):
+                suffix = get_label_property_suffix(label)
                 row = box.row(align=True)
                 row.label(text=f"{label}:")
                 col = row.column()
-                col.prop(context.scene, f'vrcft_shapekeys_{i}', icon='SHAPEKEY_DATA')
+                col.prop(context.scene, f'vrcft_shapekeys_{suffix}', icon='SHAPEKEY_DATA')
                 col = row.column()
-                col.prop(context.scene, f'vrcft_vertex_groups_{i}', icon='GROUP_VERTEX')
+                col.prop(context.scene, f'vrcft_vertex_groups_{suffix}', icon='GROUP_VERTEX')
                 remove_op = row.operator("vrcft.remove_single", icon='X', text="")
                 remove_op.index = i
                 remove_op.label = label
@@ -504,16 +526,10 @@ def register():
         update=update_split
     )
 
-    max_length = max(
-        len(VRCFT_Labels_Partial_Unsplit),
-        len(VRCFT_Labels_Partial_Split),
-        len(VRCFT_Labels_Full_Unsplit),
-        len(VRCFT_Labels_Full_Split)
-    )
-
-    for i in range(max_length):
-        setattr(Scene, f"vrcft_shapekeys_{i}", EnumProperty(name='', items=get_shapekeys))
-        setattr(Scene, f"vrcft_vertex_groups_{i}", EnumProperty(name='', items=get_the_sus))
+    for label in get_all_labels():
+        suffix = get_label_property_suffix(label)
+        setattr(Scene, f"vrcft_shapekeys_{suffix}", EnumProperty(name='', items=get_shapekeys))
+        setattr(Scene, f"vrcft_vertex_groups_{suffix}", EnumProperty(name='', items=get_the_sus))
 
 def unregister():
     bpy.utils.unregister_class(VRCFTCreateShapeKeys)
@@ -527,16 +543,10 @@ def unregister():
     del Scene.vrcft_mode
     del Scene.vrcft_split
 
-    max_length = max(
-        len(VRCFT_Labels_Partial_Unsplit),
-        len(VRCFT_Labels_Partial_Split),
-        len(VRCFT_Labels_Full_Unsplit),
-        len(VRCFT_Labels_Full_Split)
-    )
-
-    for i in range(max_length):
-        delattr(Scene, f"vrcft_shapekeys_{i}")
-        delattr(Scene, f"vrcft_vertex_groups_{i}")
+    for label in get_all_labels():
+        suffix = get_label_property_suffix(label)
+        delattr(Scene, f"vrcft_shapekeys_{suffix}")
+        delattr(Scene, f"vrcft_vertex_groups_{suffix}")
 
 if __name__ == "__main__":
     register()
