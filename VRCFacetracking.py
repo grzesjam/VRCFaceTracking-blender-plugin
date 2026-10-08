@@ -333,6 +333,28 @@ def get_all_labels():
         VRCFT_PU_OG + VRCFT_PS_OG + VRCFT_FU_OG + VRCFT_FS_OG
     ))
 
+class VRCFTAssignMatchingShapeKeys(Operator):
+    bl_label = "Assign Matching Shape Keys"
+    bl_idname = "vrcft.assign_matching_shapekeys"
+    bl_description = "Select an existing shape key when its name matches a VRCFT label"
+
+    def execute(self, context):
+        mesh = context.view_layer.objects.get(context.scene.vrcft_mesh)
+        if not mesh or not mesh.data.shape_keys:
+            self.report({'WARNING'}, "No shape keys found on mesh")
+            return {'CANCELLED'}
+
+        existing_keys = {key.name for key in mesh.data.shape_keys.key_blocks}
+        assigned = 0
+        for label in get_the_among_us(context):
+            if label in existing_keys:
+                suffix = get_label_property_suffix(label)
+                setattr(context.scene, f"vrcft_shapekeys_{suffix}", label)
+                assigned += 1
+
+        self.report({'INFO'}, f"Assigned {assigned} matching shape key(s)")
+        return {'FINISHED'}
+
 class VRCFTCreateShapeKeys(Operator):
     bl_label = "Create VRCFT Shape Keys"
     bl_idname = "vrcft.create_shapekeys"
@@ -361,7 +383,7 @@ class VRCFTCreateShapeKeys(Operator):
             source_key = getattr(context.scene, f"vrcft_shapekeys_{suffix}")
             vertex_group = getattr(context.scene, f"vrcft_vertex_groups_{suffix}")
 
-            if label in existing_keys and source_key == "Basis":
+            if label in existing_keys and source_key in {"Basis", label}:
                 continue
 
             if label not in existing_keys:
@@ -487,6 +509,8 @@ class VRCFT_UL(Panel):
                 remove_op.label = label
 
             row = layout.row()
+            row.operator("vrcft.assign_matching_shapekeys", icon='VIEWZOOM')
+            row = layout.row()
             row.operator("vrcft.create_shapekeys", icon='MESH_MONKEY')
             row = layout.row()
             row.operator("vrcft.remove_shapekeys", icon='X')
@@ -496,6 +520,7 @@ class VRCFT_UL(Panel):
             layout.label(text='Select the mesh with face shape keys.', icon='INFO')
 
 def register():
+    bpy.utils.register_class(VRCFTAssignMatchingShapeKeys)
     bpy.utils.register_class(VRCFTCreateShapeKeys)
     bpy.utils.register_class(VRCFTRemoveShapeKeys)
     bpy.utils.register_class(VRCFTClearNonVRCFT)
@@ -532,6 +557,7 @@ def register():
         setattr(Scene, f"vrcft_vertex_groups_{suffix}", EnumProperty(name='', items=get_the_sus))
 
 def unregister():
+    bpy.utils.unregister_class(VRCFTAssignMatchingShapeKeys)
     bpy.utils.unregister_class(VRCFTCreateShapeKeys)
     bpy.utils.unregister_class(VRCFTRemoveShapeKeys)
     bpy.utils.unregister_class(VRCFTClearNonVRCFT)
